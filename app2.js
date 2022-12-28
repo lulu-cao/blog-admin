@@ -1,17 +1,19 @@
-// This is more complex example code from AdminJS with authentication (need to change Line 53 connectionString in order to use)
+// This is more complex example code from AdminJS with authentication
+// Need to change process.env.NODE_ENV and read more about session and store
+// Here is a good place to start: https://www.npmjs.com/package/connect-session-sequelize
+// Last step would be to try PostgreSQL and Prisma 
 const AdminJS = require('adminjs')
 const AdminJSExpress = require('@adminjs/express')
 const express = require('express')
-
-// Store our session in a Postgres table and 
-// allow our session store to connect to the database.
-const Connect = require('connect-pg-simple')
+const passwordsFeature = require('@adminjs/passwords');
+const argon2 = require('argon2');
+const connect = require("connect");
 const session = require('express-session')
 
-// Register Adapters Line 8-14
 const AdminJSSequelize = require('@adminjs/sequelize')
-const sequelize = require('./config/connection1.js')
-const Category = require('./models/Category.js');
+const sequelize = require('./config/connection.js')
+const { componentLoader } = require('./components')
+const User = require('./models/user.js');
 
 AdminJS.registerAdapter({
   Resource: AdminJSSequelize.Resource,
@@ -32,30 +34,62 @@ const authenticate = async (email, password) => {
   return null
 }
 
+// Below is example code for really authenticating user by comparing the password they entered with that saved in the database
+// Below uses Prisma for PostgreSQL
+
+// const authenticate = async (email, password) => {
+//   const user = await prisma.user.findFirst({
+//     where:{
+//       email: email
+//     }
+//   })
+
+//   if (user && await argon2.verify(user.password, password)) {
+//     return Promise.resolve(user)
+//   }
+//   return null
+// }
+
 const start = async () => {
   const app = express()
 
-  // Register Adapters Line 34-43
+  // Initalize sequelize with session store
+  const SequelizeStore = require("connect-session-sequelize")(
+    session.Store
+  );
+  
+  connect().use(
+    connect.session({
+      store: new SequelizeStore({
+        db: sequelize,
+      }),
+      secret: "***************CHANGEME",
+    })
+  );
+
   const adminOptions = {
-    // We pass Category to `resources`
-    resources: [Category],
+    databases: [], 
+    resources: [
+      {
+        resource: User,
+        options: {
+          properties: { password: { isVisible: false } },
+        },
+        features: [
+          passwordsFeature({
+            properties: {
+              encryptedPassword: 'password',
+              password: 'newPassword'
+            },
+            hash: argon2.hash,
+          })
+        ]
+      }
+    ], 
+    componentLoader, 
   }
   
-  // Please note that some plugins don't need you to create AdminJS instance manually,
-  // instead you would just pass `adminOptions` into the plugin directly,
-  // an example would be "@adminjs/hapi"
-  // const admin = new AdminJS(adminOptions)
-  const admin = new AdminJS({})
-
-  const ConnectSession = Connect(session)
-  const sessionStore = new ConnectSession({
-    conObject: {
-      connectionString: 'postgres://adminjs:adminjs@localhost:5435/adminjs',
-      ssl: process.env.NODE_ENV === 'production',
-    },
-    tableName: 'session',
-    createTableIfMissing: true,
-  })
+  const admin = new AdminJS(adminOptions)
 
   const adminRouter = AdminJSExpress.buildAuthenticatedRouter(
     admin,
@@ -66,7 +100,7 @@ const start = async () => {
     },
     null,
     {
-      store: sessionStore,
+      store: SequelizeStore,
       resave: true,
       saveUninitialized: true,
       secret: 'sessionsecret',
@@ -76,7 +110,8 @@ const start = async () => {
       },
       name: 'adminjs',
     }
-  )
+  );
+  
   app.use(admin.options.rootPath, adminRouter)
 
   // Force true to drop/recreate tables on every sync; good for development, not for production
