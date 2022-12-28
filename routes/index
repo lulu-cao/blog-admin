@@ -1,0 +1,9 @@
+const router = require('express').Router();
+const bookRoutes = require('./bookRoutes');
+
+// Prefix all routes defined in 'bookRoutes.js' with '/books'
+// To send request to bookRoutes, use API endpoint http://localhost:3000/books/
+// It works; all data received can be seen on the web app
+router.use('/books', bookRoutes);
+
+module.exports = router;
